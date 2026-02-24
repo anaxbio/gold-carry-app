@@ -3,65 +3,59 @@ import pandas as pd
 
 st.set_page_config(page_title="Gold Carry Pro", page_icon="🪙", layout="wide")
 
-# --- ACTUAL DATA (Feb 24, 2026) ---
-# Use the price of 1 full Guinea Lot from your broker terminal
-MARCH_GUINEA_LOT_PRICE = 131644.00 
-GUINEA_GRAM_CALC = MARCH_GUINEA_LOT_PRICE / 8
-
-# Your SGB Series (SGBJUN31I)
-MY_SGB_PRICE = 15920.00
-MY_COST_BASIS = 15906.67
-MY_QTY = 24 # 3 lots of 8
-
-# Your Short Entry (The price where you actually sold the 3 lots)
-MY_SHORT_ENTRY_LOT = 131600.00 
-SHORT_ENTRY_GRAM = MY_SHORT_ENTRY_LOT / 8
-
+# --- 1. PORTFOLIO EDITOR (ELI5: The Mini-Excel) ---
 st.title("🪙 Gold Guinea Carry Tracker")
 
-# 1. THE HEDGE ACCOUNTING
-st.subheader("📝 Hedge Summary")
-col1, col2 = st.columns(2)
+st.subheader("📝 Manage Your Portfolio")
+st.info("Edit the table below to update your trade prices or quantity. It updates everything instantly!")
 
-with col1:
-    st.info(f"""
-    **SGB Position (Buy)**
-    * Quantity: {MY_QTY} units
-    * Avg Cost: ₹{MY_COST_BASIS:,.2f}
-    * Current: ₹{MY_SGB_PRICE:,.2f}
-    """)
+# Initial data for your 3 lots
+if 'portfolio_df' not in st.session_state:
+    st.session_state.portfolio_df = pd.DataFrame([
+        {
+            "SGB Series": "SGBJUN31I",
+            "Units": 24,
+            "SGB Buy Price": 15906.67,
+            "Guinea Sell Price (Lot)": 131600.00
+        }
+    ])
 
-with col2:
-    st.warning(f"""
-    **MCX Position (Short)**
-    * Quantity: 3 Lots (24g)
-    * Avg Sell: ₹{SHORT_ENTRY_GRAM:,.2f} / g
-    * Current: ₹{GUINEA_GRAM_CALC:,.2f} / g
-    """)
+# Display the editable table
+edited_df = st.data_editor(st.session_state.portfolio_df, num_rows="dynamic")
+st.session_state.portfolio_df = edited_df
+
+# --- 2. CURRENT MARKET PRICES (Hardcoded or Scraped) ---
+# Update these as per market LTP
+LIVE_SGB_LTP = 15920.00
+LIVE_GUINEA_LOT_LTP = 131644.00
+
+# --- 3. THE MATH ENGINE ---
+# We take the first row of your edited table for calculations
+row = edited_df.iloc[0]
+my_qty = row["Units"]
+my_sgb_cost = row["SGB Buy Price"]
+my_guinea_sell_gram = row["Guinea Sell Price (Lot)"] / 8
+live_guinea_gram = LIVE_GUINEA_LOT_LTP / 8
 
 st.divider()
 
-# 2. THE REAL P&L (Net)
-st.subheader("💰 Total Net Performance")
-sgb_pnl = (MY_SGB_PRICE - MY_COST_BASIS) * MY_QTY
-# Short P&L = (Entry - Current)
-mcx_pnl = (SHORT_ENTRY_GRAM - GUINEA_GRAM_CALC) * MY_QTY
+# --- 4. LIVE PERFORMANCE ---
+st.subheader("💰 Live Performance")
+sgb_pnl = (LIVE_SGB_LTP - my_sgb_cost) * my_qty
+mcx_pnl = (my_guinea_sell_gram - live_guinea_gram) * my_qty
 total_net = sgb_pnl + mcx_pnl
 
 c1, c2, c3 = st.columns(3)
 c1.metric("SGB P&L", f"₹{sgb_pnl:,.0f}")
 c2.metric("MCX P&L", f"₹{mcx_pnl:,.0f}", delta_color="inverse")
-c3.metric("NET PROFIT", f"₹{total_net:,.0f}", "Pure Arbitrage")
+c3.metric("NET PROFIT", f"₹{total_net:,.0f}", "Pure Carry")
 
+# --- 5. THE SWAP SCANNER ---
 st.divider()
-
-# 3. SWAP SCANNER
-st.subheader("🔍 SGB Swap Scanner")
-# Spot is ~16,080 today
+st.subheader("🔍 SGB Market Scanner")
 spot = 16080 
 scanner_data = [
-    {"Symbol": "SGBJUN31I (Yours)", "Price": MY_SGB_PRICE, "Discount": f"{((spot-MY_SGB_PRICE)/spot)*100:.2f}%"},
+    {"Symbol": row["SGB Series"], "Price": LIVE_SGB_LTP, "Discount": f"{((spot-LIVE_SGB_LTP)/spot)*100:.2f}%"},
     {"Symbol": "SGBJUN27", "Price": 15300, "Discount": f"{((spot-15300)/spot)*100:.2f}%"},
-    {"Symbol": "SGBMAY26", "Price": 15410, "Discount": f"{((spot-15410)/spot)*100:.2f}%"},
 ]
 st.table(pd.DataFrame(scanner_data))
