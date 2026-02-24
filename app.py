@@ -1,39 +1,59 @@
 import streamlit as st
+import yfinance as yf
 import pandas as pd
+from datetime import date
 
-st.set_page_config(page_title="Gold Carry Pro", page_icon="🪙")
+st.set_page_config(page_title="Gold Carry Pro", page_icon="🪙", layout="wide")
 
-st.title("🪙 SGB-MCX Carry Tracker")
+# --- DYNAMIC DATA FETCHING ---
+@st.cache_data(ttl=600) # This keeps the data for 10 mins so we don't get blocked
+def get_live_gold():
+    # 'GC=F' is the symbol for Global Gold Futures
+    # 'INR=X' is the USD to INR exchange rate
+    gold = yf.Ticker("GC=F").fast_info['last_price']
+    usd_inr = yf.Ticker("INR=X").fast_info['last_price']
+    
+    # Simple math to get approx MCX price per gram
+    # (Price per ounce / 31.1035) * USD_INR
+    mcx_approx = (gold / 31.1035) * usd_inr
+    return mcx_approx
 
-# 1. USER INPUTS
-st.sidebar.header("Your Portfolio")
-held_sgb = st.sidebar.number_input("SGB Units Held", value=40, step=8)
-avg_cost = st.sidebar.number_input("Avg Purchase Price", value=7500)
+try:
+    live_gram_price = get_live_gold()
+except:
+    live_gram_price = 16050.0 # Fallback if Yahoo is down
 
-# 2. THE 8-GRAM LOGIC
-hedge_needed = held_sgb // 8
-st.metric("Hedge Needed", f"{hedge_needed} Lots (Gold Guinea)")
+# --- YOUR PORTFOLIO ---
+MY_COST_BASIS = 15906.67
+qty = 24
 
-# 3. TRACKER SECTION
-col1, col2 = st.columns(2)
+# --- APP UI ---
+st.title("🪙 My Dynamic Gold Carry Dashboard")
+
+col1, col2, col3 = st.columns(3)
 with col1:
-    sgb_price = st.number_input("Live SGB Price (NSE)", value=8000)
+    st.metric("Live Gold (Per Gram)", f"₹{live_gram_price:.2f}")
 with col2:
-    mcx_price = st.number_input("Live Guinea Price (MCX)", value=8200)
-
-# 4. CALCULATIONS
-spread = mcx_price - sgb_price
-discount = ((8200 - sgb_price)/8200) * 100 # Approx vs spot
+    # Your 3 lots of Guinea (24g)
+    current_value = live_gram_price * qty
+    st.metric("Hedge Value (24g)", f"₹{current_value:.0f}")
+with col3:
+    # Carry = (Market - Cost)
+    carry_profit = (live_gram_price - MY_COST_BASIS) * qty
+    st.metric("Est. Carry P&L", f"₹{carry_profit:.0f}", "Live")
 
 st.divider()
-st.subheader("Market Analysis")
-st.write(f"Current Profit Gap: **₹{spread} per unit**")
-st.write(f"Estimated Discount: **{discount:.2f}%**")
 
-if discount > 4:
-    st.success("🔥 ACTION: SGB is cheap. Good time to enter/add.")
-elif discount < 1:
-    st.warning("⚠️ ACTION: SGB is expensive. Consider 'Swapping' or Booking Profit.")
+# --- SGB SCANNER (Manual for now, but linked to live spot) ---
+st.subheader("🔍 SGB Market Scanner")
+sgb_data = [
+    {"Symbol": "SGBJUN31I", "Offer": 15920},
+    {"Symbol": "SGBMAY26", "Offer": 15410},
+    {"Symbol": "SGBJUN27", "Offer": 15300},
+]
 
-# 5. EXPIRY WARNING
-st.info("💡 REMINDER: Roll your MCX hedge 6 days before expiry to avoid margin spikes!")
+for sgb in sgb_data:
+    discount = ((live_gram_price - sgb['Offer']) / live_gram_price) * 100
+    sgb['Live Discount'] = f"{discount:.2f}%"
+
+st.table(pd.DataFrame(sgb_data))
