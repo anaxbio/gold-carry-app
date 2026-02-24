@@ -1,59 +1,53 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
-from datetime import date
 
 st.set_page_config(page_title="Gold Carry Pro", page_icon="🪙", layout="wide")
 
-# --- DYNAMIC DATA FETCHING ---
-@st.cache_data(ttl=600) # This keeps the data for 10 mins so we don't get blocked
-def get_live_gold():
-    # 'GC=F' is the symbol for Global Gold Futures
-    # 'INR=X' is the USD to INR exchange rate
-    gold = yf.Ticker("GC=F").fast_info['last_price']
-    usd_inr = yf.Ticker("INR=X").fast_info['last_price']
-    
-    # Simple math to get approx MCX price per gram
-    # (Price per ounce / 31.1035) * USD_INR
-    mcx_approx = (gold / 31.1035) * usd_inr
-    return mcx_approx
+# --- DATA (Update these manually or via scraper) ---
+LIVE_SGB_PRICE = 15920.00
+LIVE_GUINEA_GRAM = 16486.00 # MCX March Guinea divided by 8
 
-try:
-    live_gram_price = get_live_gold()
-except:
-    live_gram_price = 16050.0 # Fallback if Yahoo is down
-
-# --- YOUR PORTFOLIO ---
-MY_COST_BASIS = 15906.67
+# Your Actual Entries
+SGB_AVG_BUY = 15906.67
+MCX_AVG_SELL = 16455.00 # The price at which you shorted
 qty = 24
 
-# --- APP UI ---
-st.title("🪙 My Dynamic Gold Carry Dashboard")
+st.title("🪙 SGB-MCX Two-Leg Dashboard")
 
+# 1. THE "NET" CARRY VIEW
+st.subheader("📊 Combined Portfolio Performance")
 col1, col2, col3 = st.columns(3)
+
+# Leg 1: SGB
+sgb_pnl = (LIVE_SGB_PRICE - SGB_AVG_BUY) * qty
 with col1:
-    st.metric("Live Gold (Per Gram)", f"₹{live_gram_price:.2f}")
+    st.metric("SGB Leg P&L", f"₹{sgb_pnl:.0f}", delta=f"Price: {LIVE_SGB_PRICE}")
+
+# Leg 2: MCX (Loss here is expected if gold goes up!)
+# P&L for Short = (Sell Price - Buy Price)
+mcx_pnl = (MCX_AVG_SELL - LIVE_GUINEA_GRAM) * qty
 with col2:
-    # Your 3 lots of Guinea (24g)
-    current_value = live_gram_price * qty
-    st.metric("Hedge Value (24g)", f"₹{current_value:.0f}")
+    st.metric("MCX Hedge P&L", f"₹{mcx_pnl:.0f}", delta=f"Price: {LIVE_GUINEA_GRAM:.0f}", delta_color="inverse")
+
+# THE REAL NET PROFIT
+net_pnl = sgb_pnl + mcx_pnl
 with col3:
-    # Carry = (Market - Cost)
-    carry_profit = (live_gram_price - MY_COST_BASIS) * qty
-    st.metric("Est. Carry P&L", f"₹{carry_profit:.0f}", "Live")
+    st.metric("NET Carry Profit", f"₹{net_pnl:.0f}", "Locked Spread")
 
 st.divider()
 
-# --- SGB SCANNER (Manual for now, but linked to live spot) ---
+# 2. ANALYSIS
+st.info(f"""
+💡 **Why is MCX showing a loss?** Because Gold prices rose! But look at your SGB leg—it gained **more** than the MCX lost. 
+The difference (**₹{net_pnl:.0f}**) is your 'Arbitrage' profit.
+""")
+
+# 3. SCANNER
 st.subheader("🔍 SGB Market Scanner")
+# Spot is ~16,100 today
+spot = 16100 
 sgb_data = [
-    {"Symbol": "SGBJUN31I", "Offer": 15920},
-    {"Symbol": "SGBMAY26", "Offer": 15410},
-    {"Symbol": "SGBJUN27", "Offer": 15300},
+    {"Symbol": "SGBJUN31I", "Price": LIVE_SGB_PRICE, "Discount": f"{((spot-LIVE_SGB_PRICE)/spot)*100:.1f}%"},
+    {"Symbol": "SGBJUN27", "Price": 15300, "Discount": f"{((spot-15300)/spot)*100:.1f}%"},
 ]
-
-for sgb in sgb_data:
-    discount = ((live_gram_price - sgb['Offer']) / live_gram_price) * 100
-    sgb['Live Discount'] = f"{discount:.2f}%"
-
 st.table(pd.DataFrame(sgb_data))
