@@ -4,7 +4,7 @@ import requests
 
 st.set_page_config(page_title="Gold Carry Pro", page_icon="🪙", layout="wide")
 
-# --- 1. SGB MAPPING (Needed for the Analyzer) ---
+# --- 1. SGB MAPPING ---
 MC_MAP = {
     "SGBNOV25VI": "SGBNO398", "SGBDEC2512": "SGBDE795", "SGBDEC25XI": "SGBDE729", 
     "SGBDEC2513": "SGBDE862", "SGBJUN27": "SGB15", "SGBOCT25V": "SGBOC355", 
@@ -30,7 +30,6 @@ MC_MAP = {
 
 @st.cache_data(ttl=600)
 def get_sgb_data(nse_symbol):
-    """Fetches Price and Quantity Available (Ask/Offer Depth)"""
     mc_code = MC_MAP.get(nse_symbol)
     if not mc_code: return 0.0, 0
     url = f"https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{mc_code}"
@@ -38,17 +37,26 @@ def get_sgb_data(nse_symbol):
     try:
         res = requests.get(url, headers=headers, timeout=5).json()
         data = res.get('data', {})
+        if not data: return 0.0, 0
         
-        offer = float(data.get('OPrice', 0.0))
-        ltp = float(data.get('pricecurrent', 0.0))
-        # OQty is "Offer Quantity" (how many units are available to buy at the offer price)
-        oqty = int(str(data.get('OQty', '0')).replace(',', ''))
-        vol = int(str(data.get('vol_traded', '0')).replace(',', ''))
+        offer = float(data.get('OPrice') or 0.0)
+        ltp = float(data.get('pricecurrent') or 0.0)
+        
+        def safe_int(val):
+            try:
+                if not val: return 0
+                return int(str(val).replace(',', '').split('.')[0])
+            except: return 0
+            
+        oqty = safe_int(data.get('OQty'))
+        vol = safe_int(data.get('vol_traded'))
         
         final_price = offer if offer > 0 else ltp
-        final_qty = oqty if offer > 0 else vol # Fallback to total volume if no active offer
+        final_qty = oqty if offer > 0 else vol 
+        
         return final_price, final_qty
-    except: return 0.0, 0
+    except: 
+        return 0.0, 0
 
 # --- 2. SIDEBAR: PORTFOLIO EDITOR ---
 st.sidebar.header("⚙️ My Portfolio Settings")
@@ -59,8 +67,8 @@ my_guinea_sell_lot = st.sidebar.number_input("My Guinea Sell Price (Lot)", value
 st.sidebar.divider()
 st.sidebar.header("📈 Market Live Rates")
 live_sgb_ltp = st.sidebar.number_input("SGB Market Price", value=15920.0)
-live_guinea_lot_ltp = st.sidebar.number_input("Guinea March Lot Price", value=130177.0) # Updated to current live
-spot_gold = st.sidebar.number_input("Spot 24K Gold Price", value=16183.0) # Drives the analyzer discount
+live_guinea_lot_ltp = st.sidebar.number_input("Guinea March Lot Price", value=130177.0)
+spot_gold = st.sidebar.number_input("Spot 24K Gold Price", value=16183.0) 
 
 # --- 3. MATH ENGINE ---
 my_guinea_sell_gram = my_guinea_sell_lot / 8
@@ -84,11 +92,24 @@ with c3:
 
 st.divider()
 
-# --- 5. LIVE SGB ANALYZER (LITE) ---
-st.subheader("⚡ Live SGB Market Analyzer")
-st.caption(f"Scanning all active SGBs against your spot gold input (₹{spot_gold:,.0f}) to find the deepest discounts and available liquidity.")
+# --- 5. SWAP SCANNER (Live Discount Calculation) ---
+st.subheader("🔍 SGB Market Scanner (Mini)")
+scanner_data = [
+    {"Symbol": "SGBJUN31I (Yours)", "Price": live_sgb_ltp, "Discount": f"{((spot_gold-live_sgb_ltp)/spot_gold)*100:.2f}%"},
+    {"Symbol": "SGBJUN27", "Price": 15300, "Discount": f"{((spot_gold-15300)/spot_gold)*100:.2f}%"},
+    {"Symbol": "SGBMAY26", "Price": 15410, "Discount": f"{((spot_gold-15410)/spot_gold)*100:.2f}%"},
+]
+st.table(pd.DataFrame(scanner_data))
 
-if st.button("Run Full Market Scan"):
+st.info("💡 **Pro-Tip:** If SGBJUN27 shows a discount > 5%, you can swap your JUN31 holdings to gain more gold grams instantly!")
+
+st.divider()
+
+# --- 6. LIVE SGB ANALYZER (LITE) ---
+st.subheader("⚡ Live SGB Market Analyzer")
+st.caption("Click the button below to scan all 50+ active SGBs on the NSE right now.")
+
+if st.button("Run Full Market Scan", type="primary"):
     progress_text = "Scanning NSE feeds for all SGBs..."
     my_bar = st.progress(0, text=progress_text)
     
@@ -110,9 +131,7 @@ if st.button("Run Full Market Scan"):
         my_bar.progress((i + 1) / total, text=f"Scanning {symbol}...")
         
     if analyzer_data:
-        # Filter out rows with 0 quantity available to keep the list actionable
-        df = pd.DataFrame(analyzer_data)
-        df = df[df["Qty Avail."] > 0].sort_values("Discount %", ascending=False)
+        df = pd.DataFrame(analyzer_data).sort_values("Discount %", ascending=False)
         
         st.dataframe(
             df.style.format({
@@ -124,4 +143,6 @@ if st.button("Run Full Market Scan"):
             use_container_width=True, 
             hide_index=True
         )
+    else:
+        st.error("Could not fetch data from the exchange. Please try again in a few minutes.")
     my_bar.empty()
